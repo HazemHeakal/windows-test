@@ -337,20 +337,20 @@ jobs:
 
 
           Get-Content "allure-history/index.html"
-      - name: AWS:COPY:FILE:TO:S3
-        uses: tillster/github-actions/aws_copy_files_to_s3@v1
-        with: null
-        path_to_dir_or_file: ./allure-report/
-        s3_bucket: ${{env.ALLURE_REPORTS_BUCKET}}
-        s3_bucket_path: ${{env.TENANT}}/allure-report/
-        assume_role: ${{ env.TF_VAR_deployment_role }}
-      - name: AWS:COPY:FILE:TO:S3
-        uses: tillster/github-actions/aws_copy_files_to_s3@v1
-        with:
-          path_to_dir_or_file: ./allure-history/
-          s3_bucket: ${{env.ALLURE_REPORTS_BUCKET}}
-          s3_bucket_path: ${{env.TENANT}}/allure-report/allure-history/
-          assume_role: ${{ env.TF_VAR_deployment_role }}
+   #   - name: AWS:COPY:FILE:TO:S3
+   #     uses: tillster/github-actions/aws_copy_files_to_s3@v1
+   #     with: null
+   #     path_to_dir_or_file: ./allure-report/
+   #     s3_bucket: ${{env.ALLURE_REPORTS_BUCKET}}
+   #     s3_bucket_path: ${{env.TENANT}}/allure-report/
+   #     assume_role: ${{ env.TF_VAR_deployment_role }}
+   #   - name: AWS:COPY:FILE:TO:S3
+   #     uses: tillster/github-actions/aws_copy_files_to_s3@v1
+   #     with:
+   #       path_to_dir_or_file: ./allure-history/
+   #       s3_bucket: ${{env.ALLURE_REPORTS_BUCKET}}
+   #       s3_bucket_path: ${{env.TENANT}}/allure-report/allure-history/
+   #       assume_role: ${{ env.TF_VAR_deployment_role }}
       - name: RENAME:ROBOT:REPORTS
         shell: pwsh
         run: |
