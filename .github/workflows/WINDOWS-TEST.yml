@@ -1,0 +1,427 @@
+---
+name: WINDOWS:TEST3
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      TESTRUNID:
+        description: Unique-Test-Name
+        required: true
+        default: "781974"
+      DEVICE:
+        description: DEVICE you want to use.
+        required: true
+        type: choice
+        options:
+          - Samsung Galaxy S20
+          - iPhone XS
+      TENANT:
+        description: Tenant to run tests for.
+        required: true
+        type: choice
+        options:
+          - jb-ph-mobile
+          - hb-us-mobile
+      ENVIRONMENT:
+        description: Tenant to run tests for.
+        required: true
+        type: choice
+        options:
+          - qa-a
+          - qa-b
+          - qa_a
+          - qa_b
+      OS_VERSION:
+        description: OS_VERSION you want to use.
+        required: true
+        type: choice
+        options:
+          - 10
+          - 12.4
+      OS:
+        description: OS you want to use.
+        required: true
+        type: choice
+        options:
+          - Android
+          - iOS
+      VERSIONTESTED:
+        description: ""
+        required: true
+        default: Sample_test_23
+      APPURL:
+        description: ""
+        required: true
+        default: bs://db2d051598251db19c1afde564356a2370bec38e
+      PROJECT_TOKEN:
+        description: ""
+        required: true
+        default: ""
+jobs:
+  run_tests:
+    name: run_tests
+    runs-on: windows-latest
+    env:
+      BRANCH: origin/master
+      TESTRUNID: ${{ github.event.inputs.TESTRUNID }}
+      DEVICE: ${{ github.event.inputs.DEVICE }}
+      TENANT: ${{ github.event.inputs.TENANT }}
+      ENVIRONMENT: ${{ github.event.inputs.ENVIRONMENT }}
+      OS_VERSION: ${{ github.event.inputs.OS_VERSION }}
+      OS: ${{ github.event.inputs.OS }}
+      VERSIONTESTED: ${{ github.event.inputs.VERSIONTESTED }}
+      APPURL: ${{ github.event.inputs.APPURL }}
+      PROJECT_TOKEN: ${{ github.event.inputs.PROJECT_TOKEN }}
+      ALLURE_REPORTS_BUCKET: windows-allure-reports.www
+      CLOUD_FRONT_DISTRIBUTION_ID: E2E3MHBD43Y4YG
+    strategy:
+      matrix:
+        os:
+          - tillster-self-hosted-e
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Set up pip and install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r .github\workflows\requirements.txt
+      - name: Set up Java 11 and Maven
+        uses: actions/setup-java@v2
+        with:
+          java-version: "11"
+          distribution: adopt
+      - name: Install Node.js LTS
+        uses: actions/setup-node@v2
+        with:
+          node-version: lts/*
+      - name: Install Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 3.2.2
+      - name: Install hiptest-publisher gem
+        run: gem install hiptest-publisher
+      - name: InsGoogle Ctall hrome
+        run: choco install googlechrome -y
+      - name: Set up Chromedriver
+        uses: nanasess/setup-chromedriver@v1
+      - name: Install Tesseract, Ghostscript, GhostPCL, ImageMagick
+        run: choco install tesseract ghostscript imagemagick -y
+      - name: Check ImageMagick version
+        run: magick -version
+      - name: DOWNLOAD:EXECUTE:QA:TESTS
+        shell: pwsh
+        run: >
+          Write-Host "**********Download & Execute Tests**********"
+
+          Set-Location scripts/
+
+          ./download_tests.ps1 ${env:TESTRUNID} ${env:OS} ${env:ENVIRONMENT} ${env:TENANT} ${env:PROJECT_TOKEN} download
+
+          Set-Location ..
+
+          pabot --pabotlib --pabotlibport 0 --testlevelsplit --processes 5 --listener 'allure_robotframework;./output/allure' -d results -L trace --variable tenant:"${env:TENANT}" --variable environment:"${env:ENVIRONMENT}" --variable app_url:"${env:APPURL}" --variable build_version:"${env:VERSIONTESTED}" --variable local_identifier:Slave5 tenants/ || true
+      - name: RE:RUN:FAILED:TESTS
+        shell: pwsh
+        run: >
+          $env:PATH = "/home/runner/miniconda3/bin;$env:PATH"
+
+          Write-Host "**********RE-Run Failed Tests**********"
+
+          pabot --pabotlib --pabotlibport 0 --testlevelsplit --processes 5 --listener 'allure_robotframework;./output/allure' -d results -L trace --rerunfailed results/output.xml -o rerun.xml --variable tenant:"${env:TENANT}" --variable environment:"${env:ENVIRONMENT}" --variable app_url:"${env:APPURL}" --variable OS:"${env:OS}" --variable os_version:"${env:OS_VERSION}" --variable device:"${env:DEVICE}" --variable build_version:"${env:VERSIONTESTED}" --variable local_identifier:Slave5 tenants/ || $true
+      - name: COMBINE:RESULTS
+        shell: pwsh
+        run: >
+          $env:PATH = "/home/runner/miniconda3/bin;$env:PATH"
+
+          Write-Host "**********Combine Results**********"
+
+          Copy-Item -Path results/log.html -Destination results/log1.html
+
+          python3 -m robot.rebot -d results -o output.xml --merge results/output.xml results/rerun.xml || $true
+      - name: PUSH:RESULTS
+        shell: pwsh
+        run: >
+          Set-Location -Path scripts/
+
+          Write-Host "**********Push Results Started**********"
+
+          $env:PATH = "/home/runner/miniconda3/bin;$env:PATH"
+
+          ./download_tests.ps1 -TESTRUNID $env:TESTRUNID -OS $env:OS -ENVIRONMENT $env:ENVIRONMENT -TENANT $env:TENANT -PROJECT_TOKEN $env:PROJECT_TOKEN -LAST_PARAMETER 'push'
+      - name: DOWNLOAD:ALLURE:COMMAND:LINE
+        shell: pwsh
+        run: >
+          Invoke-WebRequest -Uri
+          "https://repo.maven.apache.org/maven2/io/qameta/allure/allure-commandline/2.13.8/allure-commandline-2.13.8.tgz"
+          -OutFile "allure-2.13.8.tgz"
+
+          Expand-Archive -Path "allure-2.13.8.tgz" -DestinationPath "/opt/"
+
+          if(!(Test-Path -Path "/usr/bin/allure")) { New-Item -ItemType SymbolicLink -Path "/usr/bin/allure" -Target "/opt/allure-2.13.8/bin/allure" } else { Write-Host "exists" }
+
+          & allure --version
+
+          & allure generate --clean -o allure-results
+
+          Copy-Item -Path results/* -Destination reports -Recurse
+
+          Set-Acl -Path ./ -AclObject (Get-Acl ./).SetAccessRuleProtection($false, $false)
+      - name: AWS:EKS:PULL:KUBECONFIG
+        uses: tillster/github-actions/aws_pull_eks_kube_config@v1
+        with:
+          cluster_name: tillster-shared-eks
+          aws_region: us-east-1
+          location: /home/runner/.kube/config
+      - name: VAULT:SECRET:RETRIEVAL:MULTIPATH
+        uses: tillster/github-actions/utility_vault_secrets_to_masked_env@v1
+        with:
+          vault_paths: kv-v2/dev/us/defaults/terraform
+          vault_pod: vault-1
+          vault_namespace: vault
+          kubeconfig_location: /home/runner/.kube/config
+          vault_token: ${{ secrets.TILLSTER_VAULT_TOKEN }}
+          debug: "false"
+      - name: AWS:ASSUME:SESSION
+        uses: tillster/github-actions/aws_assume_role@v1
+        with:
+          aws_role: ${{ env.TF_VAR_deployment_role }}
+      - name: AWS:S3:COPY:HISTORY
+        shell: pwsh
+        run: >
+          Get-Location
+
+          Get-ChildItem -Force
+
+          if(!(Test-Path -Path allure-report)) { New-Item -ItemType Directory -Force -Path allure-report }
+
+          Set-Location allure-report/
+
+          Get-ChildItem -Force
+
+          if(!(Test-Path -Path allure-history)) { New-Item -ItemType Directory -Force -Path allure-history/ }
+
+          Set-Acl -Path /home/runner/work/ui-test-automation -AclObject (Get-Acl -Path /home/runner/work/ui-test-automation).SetAccessRuleProtection($false, $false)
+
+          Read-S3Object -BucketName ${{ env.ALLURE_REPORTS_BUCKET }} -KeyPrefix "${{ env.TENANT }}/allure-report/" -Folder "./"
+
+          Get-Location
+
+          Get-ChildItem -Force ./
+
+          Get-ChildItem -Force allure-history/
+      - name: GENERATE:ALLURE:REPORT
+        shell: pwsh
+        env:
+          INPUT_KEEP_REPORTS: 20
+          INPUT_ALLURE_RESULTS: output/allure
+          INPUT_GITHUB_RUN_NUM: ${{ github.run_number }}
+          INPUT_GITHUB_RUN_ID: ${{ env.GITHUB_RUN_ID }}
+          INPUT_GITHUB_REPO: ui-test-automation
+          INPUT_ALLURE_REPORT: allure-report
+          INPUT_ALLURE_HISTORY: allure-history
+        run: >
+          New-Item -ItemType Directory -Force -Path "./${env:INPUT_ALLURE_HISTORY}"
+
+
+          $count = (Get-ChildItem -Path "./${env:INPUT_ALLURE_HISTORY}").Count
+
+          Write-Host "count folders in ${env:INPUT_ALLURE_HISTORY}: $count"
+
+          Write-Host "keep reports count ${env:INPUT_KEEP_REPORTS}"
+
+          $env:INPUT_KEEP_REPORTS = $env:INPUT_KEEP_REPORTS + 1
+
+          Write-Host "if $count > ${env:INPUT_KEEP_REPORTS}"
+
+
+          if ($count -gt $env:INPUT_KEEP_REPORTS) {
+              Set-Location "./${env:INPUT_ALLURE_HISTORY}"
+              Write-Host "remove old reports"
+              Get-ChildItem | Sort-Object | Select-Object -First ($env:INPUT_KEEP_REPORTS - 2) | Remove-Item -Recurse -Force
+              Set-Location $env:GITHUB_WORKSPACE
+          }
+
+
+          $jsonContent = @{
+              "name" = "GitHub Actions"
+              "type" = "github"
+              "reportName" = "Allure Report with history"
+              "url" = $env:GITHUB_PAGES_WEBSITE_URL
+              "reportUrl" = "${env:GITHUB_PAGES_WEBSITE_URL}/${env:INPUT_GITHUB_RUN_NUM}/"
+              "buildUrl" = "https://github.com/${env:INPUT_GITHUB_REPO}/actions/runs/${env:INPUT_GITHUB_RUN_ID}"
+              "buildName" = "GitHub Actions Run ${env:INPUT_GITHUB_RUN_ID}"
+              "buildOrder" = "${env:INPUT_GITHUB_RUN_NUM}"
+          } | ConvertTo-Json -Compress
+
+
+          Set-Content -Path "./${env:INPUT_ALLURE_RESULTS}/executor.json" -Value $jsonContent
+
+
+          Write-Host "keep allure history from ./history to ${env:INPUT_ALLURE_RESULTS}/history"
+
+          Get-Location
+
+          Set-Location "./allure-report/"
+
+          Get-Location
+
+          Get-ChildItem -Hidden
+
+          Copy-Item -Path "./history/" -Destination "../${env:INPUT_ALLURE_RESULTS}/history" -Recurse
+
+          Set-Location "../"
+
+          Get-Location
+
+
+          Write-Host "generating report from ${env:INPUT_ALLURE_RESULTS} to ${env:INPUT_ALLURE_REPORT} ..."
+
+          allure generate --clean ${env:INPUT_ALLURE_RESULTS} -o ${env:INPUT_ALLURE_REPORT}
+
+
+          Write-Host "copy allure-report to ${env:INPUT_ALLURE_HISTORY}/${env:INPUT_GITHUB_RUN_NUM}"
+
+          Copy-Item -Path "./${env:INPUT_ALLURE_REPORT}/" -Destination "./${env:INPUT_ALLURE_HISTORY}/${env:INPUT_GITHUB_RUN_NUM}" -Recurse
+
+
+          Write-Host "copy allure-report history to /${env:INPUT_ALLURE_HISTORY}/last-history"
+
+          Copy-Item -Path "./${env:INPUT_ALLURE_REPORT}/history/" -Destination "./${env:INPUT_ALLURE_HISTORY}/last-history" -Recurse
+      - name: GENERATE:ALLURE:REPORT
+        uses: simple-elf/allure-report-action@master
+        if: always()
+        id: allure-report
+        with: null
+        allure_results: output/allure
+        gh_pages: gh-pages
+        allure_report: allure-report
+        allure_history: allure-history
+        keep_reports: 20
+      - name: AWS:S3:COPY:HISTORY
+        shell: pwsh
+        run: >
+          $historyDirectories = Get-ChildItem -Path "./allure-history" -Directory |
+          Where-Object { $_.Name -match '^[0-9]+$' } | Sort-Object -Property
+          Name -Descending
+
+          Write-Output $historyDirectories.FullName
+
+
+          $latestHistoryDirectory = $historyDirectories[0].Name
+
+          Write-Output "Latest Allure Dir: $latestHistoryDirectory"
+
+
+          Remove-Item -Path "allure-history/index.html" -ErrorAction SilentlyContinue
+
+          # No direct equivalent for 'chmod' in Windows. 
+
+          # Consider setting specific permissions according to your needs.
+
+
+          $htmlContent = @"
+
+          <!DOCTYPE html><meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"0; URL=https://reports-linux.qa.tillster.com/hb-us-mobile/allure-report/allure-history/$latestHistoryDirectory/\">
+
+          <meta http-equiv=\"Pragma\" content=\"no-cache\"><meta http-equiv=\"Expires\" content=\"0\">
+
+          "@
+
+          $htmlContent | Out-File -FilePath "allure-history/index.html" -Encoding utf8
+
+
+          Get-Content "allure-history/index.html"
+      - name: AWS:COPY:FILE:TO:S3
+        uses: tillster/github-actions/aws_copy_files_to_s3@v1
+        with: null
+        path_to_dir_or_file: ./allure-report/
+        s3_bucket: ${{env.ALLURE_REPORTS_BUCKET}}
+        s3_bucket_path: ${{env.TENANT}}/allure-report/
+        assume_role: ${{ env.TF_VAR_deployment_role }}
+      - name: AWS:COPY:FILE:TO:S3
+        uses: tillster/github-actions/aws_copy_files_to_s3@v1
+        with:
+          path_to_dir_or_file: ./allure-history/
+          s3_bucket: ${{env.ALLURE_REPORTS_BUCKET}}
+          s3_bucket_path: ${{env.TENANT}}/allure-report/allure-history/
+          assume_role: ${{ env.TF_VAR_deployment_role }}
+      - name: RENAME:ROBOT:REPORTS
+        shell: pwsh
+        run: |
+          Move-Item -Path results/report.html -Destination results/index.html
+          Get-ChildItem -Path results/ | Format-List
+      - name: AWS:COPY:FILE:TO:S3
+        uses: tillster/github-actions/aws_copy_files_to_s3@v1
+        with:
+          path_to_dir_or_file: ./results/
+          s3_bucket: ${{env.ALLURE_REPORTS_BUCKET}}
+          s3_bucket_path: ${{env.TENANT}}/robot-reports/
+          assume_role: ${{ env.TF_VAR_deployment_role }}
+      - name: GET:CLOUD:FRONT:DISTRIBUTION:DOMAIN
+        shell: pwsh
+        run: >
+          $cloudFrontDomain = aws cloudfront get-distribution --id ${{
+          env.CLOUD_FRONT_DISTRIBUTION_ID }} --query 'Distribution.DomainName'
+          --output text
+
+          Write-Host "Cloud Front Domain: $cloudFrontDomain"
+
+          Write-Host "Cloud Allure Tenant Domain: $cloudFrontDomain/$env:TENANT/allure-reports/"
+
+          Write-Host "Cloud Robot Tenant Domain: $cloudFrontDomain/$env:TENANT/robot-reports/"
+
+          Add-Content -Path $env:GITHUB_ENV -Value "cloud_front_domain=$cloudFrontDomain"
+      - name: AWS:CLOUDFRONT:INVALIDATE:CACHE
+        uses: tillster/github-actions/aws_cloudfront_invalidate_cache@v1
+        with:
+          distribution_id: ${{ env.CLOUD_FRONT_DISTRIBUTION_ID }}
+          path: /
+          assume_role: ${{ env.TF_VAR_deployment_role }}
+      - name: AWS:CLOUDFRONT:INVALIDATE:CACHE
+        uses: tillster/github-actions/aws_cloudfront_invalidate_cache@v1
+        with:
+          distribution_id: ${{ env.CLOUD_FRONT_DISTRIBUTION_ID }}
+          path: /*
+          assume_role: ${{ env.TF_VAR_deployment_role }}
+      - name: VAULT:SECRET:RETRIEVAL:MULTIPATH
+        uses: tillster/github-actions/utility_vault_secrets_to_masked_env@v1
+        with:
+          vault_paths: kv-v2/qa-legacy/us/security/defaults/route-53,kv-v2/prod/us/defaults/terraform
+          vault_pod: vault-1
+          vault_namespace: vault
+          kubeconfig_location: /home/runner/.kube/config
+          vault_token: ${{ secrets.TILLSTER_VAULT_TOKEN }}
+          debug: "false"
+      - name: AWS:ASSUME:SESSION
+        uses: tillster/github-actions/aws_assume_role@v1
+        with:
+          aws_role: ${{ env.TF_VAR_deployment_role }}
+      - name: AWS:TERRAFORM:DEPLOY:CLOUDFLARE_DNS_PROXY
+        uses: tillster/github-actions/terraform_deploy_cloudflare_dns_proxy@v1
+        with:
+          aws_region: us-east-1
+          platform_tag: tillster
+          service_tag: qa-ui-reports
+          environment_tag: qa
+          purpose_tag: reporting
+          app_name_tag: qa-reports-linux-cloudflare
+          deployment_role: ${{ env.TF_VAR_deployment_role }}
+          terraform_state_bucket: ${{ env.tf_state_bucket_name }}
+          terraform_dynamo_db_table: ${{ env.tf_state_lock_table }}
+          terraform_action: apply
+          debug: "true"
+          cloudflare_endpoint: ${{ env.cloud_front_domain }}
+          domain_prefix: reports-linux
+          dns_deployment_platform: tillster
+      - name: Clean-up
+        if: ${{ always() }}
+        shell: pwsh
+        run: >
+          Remove-Item -Recurse -Force
+          "home/runner/work/ui-test-automation/ui-test-automation"
